@@ -1,0 +1,14 @@
+# Python system files
+__pycache__/
+*.py[cod]
+*$*
+
+# Business Data - DO NOT UPLOAD
+data/DailyOuttools.xlsx
+output/
+*.xlsx
+*.xls
+
+# Environment/Secrets
+.env
+config.py

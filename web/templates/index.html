@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Daily Shipping Tool</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            font-size: 1.2rem; /* Your original size */
+            background-color: #C2C5CC; /* Your original color */
+            height: 100vh;
+            overflow: hidden; 
+        }
+
+        .main-container {
+            display: flex;
+            flex-direction: row;
+            width: 100%;
+            height: 100vh;
+        }
+
+        /* LEFT SIDE: Static, Centered, using your original flex logic */
+        .left-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            border-right: 2px solid #a0a3a9;
+            text-align: center;
+        }
+
+        /* RIGHT SIDE: Scrollable Instructions */
+        .right-panel {
+            flex: 1;
+            padding: 40px;
+            background-color: #d1d4db;
+            overflow-y: auto;
+            text-align: left;
+        }
+
+        /* Restoring your original Heading and Button styles exactly */
+        h2 { font-size: 2.5rem; margin-bottom: 10px; }
+        
+        button {
+            padding: 15px 30px;
+            font-size: 1.1rem;
+            cursor: pointer;
+            margin: 10px;
+            border-radius: 8px;
+            border: 1px solid #ccc;
+            transition: background 0.3s;
+        }
+
+        button:hover { background-color: #f0f0f0; }
+
+        /* Your specific button colors */
+        #btn-algo, #btn-shippingAlgo {
+            background-color: #007bff;
+            color: white;
+            border: none;
+        }
+
+        /* Restoring your original PRE styling */
+        pre {
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 5px;
+            max-width: 80%;
+            overflow-x: auto;
+            text-align: left; /* Keep logs readable */
+        }
+
+        /* Instructions Styling */
+        .instruction-list { list-style: none; padding: 0; }
+        .instruction-list li { margin-bottom: 30px; line-height: 1.6; }
+        
+        .step-detail { margin: 8px 0 8px 20px; }
+        
+        /* Your requested color highlights */
+        .highlight-yellow { background-color: yellow; font-weight: bold; padding: 0 4px; }
+        .highlight-blue { background-color: #add8e6; font-weight: bold; padding: 0 4px; }
+        .final-bold { 
+            background-color: #ffffcc; 
+            font-weight: bold; 
+            padding: 10px; 
+            display: block; 
+            border: 1px solid #eedc82; 
+        }
+    </style>
+</head>
+<body>
+    <div class="main-container">
+    
+        <div class="left-panel">
+            <h2>Daily Shipping Tool</h2>
+            <p>Orders awaiting shipment: <strong>{{ awaiting_count }}</strong></p>
+
+            <button id="btn-extract" onclick="runExtract()">Extract Today's Shipments</button>
+
+            <div id="progress-container" style="display:none; width: 90%; background: #eee; border-radius: 10px; margin: 20px auto;">
+                <div id="progress-bar" style="width: 0%; height: 30px; background: #28a745; border-radius: 10px; transition: width 0.3s; color: white; line-height: 30px; text-align: center;">
+                    0%
+                </div>
+            </div>
+
+            <button id="btn-algo" onclick="runAlgoDebug()">
+                Update List Algorithm Only
+            </button>
+
+            <button id="btn-shippingAlgo" onclick="runShippingAlgo()">
+                Create Shipping Labels
+            </button>
+
+            <pre id="output">System Ready...</pre>
+        </div>
+
+        <div class="right-panel">
+            <div style="background-color: #fff3cd; border: 2px solid #ffeeba; padding: 20px; border-radius: 8px; margin-bottom: 30px; color: #856404;">
+                <h3 style="margin-top: 0; color: #856404; border-bottom: 1px solid #ffeeba;">⚠️ CRITICAL PRE-CHECK</h3>
+                
+                <ul style="margin: 0; padding-left: 20px; font-size: 1.1rem; line-height: 1.6;">
+                    <li><strong>CLOSE THE EXCEL FILE:</strong> Ensure all Excel files are closed before clicking any buttons to prevent permission errors.</li>
+                    <li><strong>CONNECTION HICCUPS:</strong> ShipStation API connections can be unstable. If you see an error mentioning <em>"HTTPS Connection..."</em>, simply <strong>REFRESH the page and click the button again.</strong></li>
+                    <li><strong>ALWAYS UPDATE <span style="text-decoration: underline;">DailyOutTools.xlsx</span></strong> before starting your session.</li>
+                </ul>
+
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px dashed #ffeeba; color: #a94442;">
+                    <strong>📅 MONTHLY UPDATE REQUIRED:</strong><br>
+                    If the month or year changes, you <u>must</u> update the <code>main_file</code> variable in <code>config.py</code>:
+                    <div style="background: rgba(255,255,255,0.5); padding: 10px; margin: 10px 0; font-family: monospace; border-radius: 4px;">
+                        main_file = "data/2026_1_PROGRAM.xlsx"
+                    </div>
+                    This file <strong>MUST EXIST</strong> in the <code>daily_tool > data</code> folder, and the name must match exactly.
+                </div>
+            </div>
+            <h3>How to use this tool</h3>
+            <ul class="instruction-list">
+                <li><strong>Step 1: Extract Today's Shipments</strong> - This pulls all "Awaiting Shipment" orders from ShipStation and populates the master Excel sheet.</li>
+                <li>
+                    <strong>Step 2: Check the Excel Sheet</strong>
+                    
+                    <p style="margin-top: 10px;">
+                        Order # will be highlighted in <span style="background-color: yellow; padding: 2px 4px;">yellow</span> if there are duplicate customers
+                    </p>
+                    
+                    <p>
+                        Quantity column will highlight in <span style="background-color: #add8e6; padding: 2px 4px;">blue</span> if there are more than one SKU/qty per order
+                    </p>
+                    
+                    <p>Check the shipping rates if we're losing money</p>
+                    
+                    <p>Check the decision log sheet</p>
+                    
+                    <p>Check the List Algorithm sheet</p>
+
+                    <p>Check "possibly ebay purchase"</p>
+                    
+                    <p style="background-color: #ffffcc; padding: 5px; border-radius: 4px;">
+                        <strong>FINAL: Add dropship orders in today's sheet at the end before you do Step 3</strong>
+                    </p>
+                </li>
+                <li><strong>Step 3: Update List Algorithm</strong> - If you made changes to the Excel file, click this to re-sync List Algorithm. [Does list algorithm based on the order# column]</li>
+                <li style="margin-bottom: 40px;">
+                    <strong>Step 4: Create Shipping Labels</strong> — Generates labels in bulk via API.
+
+                    <div style="background-color: #f8d7da; color: #721c24; border-left: 5px solid #dc3545; padding: 15px; margin: 15px 0; border-radius: 4px;">
+                        <strong>⚠️ CRITICAL SAFETY CHECK:</strong><br>
+                        If a label cost does not match your expected price, the batch will <strong>automatically stop</strong> and <strong>void all previous labels</strong> to prevent overcharging.
+                    </div>
+
+                    <p><em>The 'Decision Log' sheet is the primary data source. Ensure these columns are populated:</em></p>
+
+                    <table style="width: 100%; border-collapse: collapse; background: white; font-size: 0.95rem; margin-top: 10px;">
+                        <thead>
+                            <tr style="background-color: #333; color: white; text-align: left;">
+                                <th style="padding: 10px; border: 1px solid #ddd;">Required Column</th>
+                                <th style="padding: 10px; border: 1px solid #ddd;">Accepted Values / Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Order #</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">Valid ShipStation Order ID</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Decision</td>
+                                <td style="padding: 8px; border: 1px solid #ddd; font-family: monospace; color: #d63384; font-size: 0.85rem;">
+                                    'ups_ground_saver', 'usps_priority_mail', 'usps_ground_advantage', 'usps_first_class_mail'
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">SKU Pkg</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">Maps to DIM_MAP or split via 'x'</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Weight</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">Weight in lbs (rounded up)</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Dims</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">LxWxH format</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Expected Cost</td>
+                                <td style="padding: 8px; border: 1px solid #ddd;">Matches the price from daily sheet Shipping Price</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </li>
+                <li><strong>Step 5: Download PDF</strong> - Once finished, your browser will download the merged PDF containing all labels.</li>
+            </ul>
+             <div style="margin-top: 50px; padding-top: 10px; border-top: 1px solid #c0c3c9; color: #777; font-size: 0.9rem; text-align: right;">
+                <em>Updated: 01/30/26</em>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function runExtract() {
+            const out = document.getElementById("output");
+            const btn = document.getElementById("btn-extract");
+            const progCont = document.getElementById("progress-container");
+            const progBar = document.getElementById("progress-bar");
+            
+            out.innerText = "Processing Orders... please wait.";
+            btn.disabled = true;
+            progCont.style.display = "block";
+
+            // Start Polling for progress every 500ms
+            const pollInterval = setInterval(() => {
+                fetch("/progress")
+                    .then(res => res.json())
+                    .then(data => {
+                        progBar.style.width = data.percent + "%";
+                        progBar.innerText = data.percent + "%";
+                        
+                        if (data.percent >= 100) {
+                            clearInterval(pollInterval);
+                        }
+                    });
+            }, 500);
+            
+            fetch("/run/extract", { method: "POST" })
+                .then(res => res.json())
+                .then(data => {
+                    out.innerText = JSON.stringify(data, null, 2);
+                    btn.disabled = false;
+                    clearInterval(pollInterval);
+                    progBar.style.width = "100%";
+                    alert("SUCCESS: COMPLETE")
+                })
+                .catch(err => {
+                    out.innerText = "Error: " + err;
+                    btn.disabled = false;
+                    clearInterval(pollInterval);
+                    alert("ERROR: CHECK CONSOLE")
+                });
+        }
+
+        function runAlgoDebug() {
+            const out = document.getElementById("output");
+            const btn = document.getElementById("btn-algo");
+            
+            out.innerText = "Re-calculating List Algorithm from existing sheet...";
+            btn.disabled = true;
+            
+            fetch("/run/algo_debug", { method: "POST" })
+                .then(res => res.json())
+                .then(data => {
+                    out.innerText = "SUCCESS: " + data.message;
+                    btn.disabled = false;
+                    alert("SUCCES: List Algo Debug done")
+                })
+                .catch(err => {
+                    out.innerText = "Error: " + err;
+                    btn.disabled = false;
+                    alert("ERROR: " + err)
+                });
+        }
+
+        function runShippingAlgo(){
+            const out = document.getElementById("output");
+            const btn = document.getElementById("btn-shippingAlgo");
+            const progCont = document.getElementById("progress-container");
+            const progBar = document.getElementById("progress-bar");
+
+            out.innerText = "Processing batch labels and verifying costs...";
+            btn.disabled = true;
+
+            // Show and reset progress bar
+            progCont.style.display = "block";
+            progBar.style.width = "0%";
+            progBar.innerText = "0%";
+
+            // Start Polling
+            const pollInterval = setInterval(() => {
+                fetch("/progress")
+                    .then(res => res.json())
+                    .then(data => {
+                        progBar.style.width = data.percent + "%";
+                        progBar.innerText = data.percent + "%";
+                    });
+            }, 800);
+
+            fetch("/run/shipping_algo", { method: "POST"})
+                .then(response => {
+
+                    // Stop polling once we get a response
+                    clearInterval(pollInterval);
+
+                    // Check if we got a PDF or a JSON error
+                    const contentType = response.headers.get("content-type");
+                    if (contentType && contentType.indexOf("application/pdf") !== -1) {
+                        return response.blob().then(blob => ({ blob, status: "success" }));
+                    } else {
+                        return response.json().then(data => ({ data, status: "error" }));
+                    }
+                })
+                .then(result => {
+                    if(result.status == "success"){
+                        const url = window.URL.createObjectURL(result.blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = "Batch_Labels_" + new Date().toLocaleDateString() + ".pdf";
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                        
+                        out.innerText = "SUCCESS: Labels created and merged.";
+                        alert("SUCCESS: PDF Downloaded");
+                    }else{
+                        out.innerText = "FAILED: " + (result.data.error || "Unknown Error");
+                        alert("FAILED: Check output for details");
+                    }
+                    btn.disabled = false;
+                })
+                .catch(err =>{
+                    clearInterval(pollInterval);
+                    out.innerText = "Error: " + err;
+                    btn.disabled = false;
+                    alert("CRITICAL ERROR: " + err);
+                })
+        }
+    </script>
+</body>
+</html>
