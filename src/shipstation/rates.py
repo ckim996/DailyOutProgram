@@ -12,7 +12,8 @@ URL = "https://api.shipstation.com/v2/rates/estimate"
 
 CARRIER_MAP = {
     "usps": "se-167930",
-    "ups": "se-196204"
+    "ups": "se-196204",
+    "fedex": "se-785101"
 }
 
 # 1. Get the path of the script (check_codes.py)
@@ -28,7 +29,7 @@ V2_API_KEY = os.getenv("SHIPSTATION_V2_PRODUCTION_KEY")
 V1_SHIPSTATION_API_KEY=os.getenv("SHIPSTATION_API_KEY")
 V1_SHIPSTATION_API_SECRET=os.getenv("SHIPSTATION_API_SECRET")
 
-def get_live_rates(order_no,carrier, service, pkg, weight, dims=None, to_state="CA", to_zip="90058",is_residential=False):
+def get_live_rates(order_no, order_info, carrier, service, pkg, weight, dims=None, to_state="CA", to_zip="90058",is_residential=False):
 
     """
         Fetches real-time shipping rates from the ShipStation V2 API.
@@ -43,10 +44,6 @@ def get_live_rates(order_no,carrier, service, pkg, weight, dims=None, to_state="
     """
 
     print(f"DEBUG get_live_rates|Order:{order_no} entered")
-
-    order_info = get_order_address(order_no)
-    if not order_info:
-        return [], is_residential
     
     addr = order_info['ship_to']
     carrier_id = CARRIER_MAP.get(carrier.lower())

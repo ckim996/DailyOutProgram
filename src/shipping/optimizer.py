@@ -4,7 +4,7 @@ import pandas as pd
 from src.shipping.engine import parse_dims
 import config
 
-def shop_and_optimize(order_no,weight, dims, to_state, to_zip, sku_info, store_id=None, is_residential=False):
+def shop_and_optimize(order_no, order_info,weight, dims, to_state, to_zip, sku_info, store_id=None, is_residential=False):
 
     """
         Optimization Engine: Compares multiple carriers and packaging options
@@ -67,18 +67,18 @@ def shop_and_optimize(order_no,weight, dims, to_state, to_zip, sku_info, store_i
     # 2. Fetch rates for all dimension sets
     for label, d, pkg_str in dim_sets:
         print(f"--- Fetching rates for {label}: {d} ---")
-        usps, verified_res = get_live_rates(order_no, "usps", "usps_ground_advantage", "package", weight, d, to_state, to_zip, is_residential)
+        usps, verified_res = get_live_rates(order_no, order_info, "usps", "usps_ground_advantage", "package", weight, d, to_state, to_zip, is_residential)
         
         # After running get_live_rates on usps, it'll update the is_residential so that we can use it for ups
         is_residential = verified_res
         ups = []
         if is_residential and not (datetime.now().weekday() == 5 or (datetime.now().weekday() == 4 and datetime.now().hour >= 12)):
-            #ups = get_live_rates(order_no, "ups", "ups_ground_saver", "package", weight, d, to_state, to_zip, is_residential)
-            ups, _ = get_live_rates(order_no, "ups", None, "package", weight, d, to_state, to_zip, is_residential) # set it as none to get both ups_ground and ups_ground_saver
+            #ups = get_live_rates(order_no, order_info, "ups", "ups_ground_saver", "package", weight, d, to_state, to_zip, is_residential)
+            ups, _ = get_live_rates(order_no, order_info, "ups", None, "package", weight, d, to_state, to_zip, is_residential) # set it as none to get both ups_ground and ups_ground_saver
 
         print(f"{order_no} | [SHOP_AND_OPTIMIZE] DEBUG: UPS call returned {len(ups)} rates")
 
-        priority_std_raw, _ = get_live_rates(order_no, "usps", "usps_priority_mail", "package", weight, d, to_state, to_zip, is_residential)
+        priority_std_raw, _ = get_live_rates(order_no, order_info, "usps", "usps_priority_mail", "package", weight, d, to_state, to_zip, is_residential)
 
         priority_std = [
             r for r in priority_std_raw 
@@ -97,7 +97,7 @@ def shop_and_optimize(order_no,weight, dims, to_state, to_zip, sku_info, store_i
             if p_code in config.pkg_map and p_code not in checked_priority_codes:
                 ss_code = config.pkg_map[p_code]
                 # Pass None for dims when using specific Flat Rate package codes
-                res, _ = get_live_rates(order_no, "usps", "usps_priority_mail", ss_code, weight, None, to_state, to_zip, is_residential)
+                res, _ = get_live_rates(order_no, order_info,"usps", "usps_priority_mail", ss_code, weight, None, to_state, to_zip, is_residential)
                 filtered_res = [r for r in res if (r.get("packageType") or r.get("package_type")) == ss_code]
                 for fr_rate in filtered_res:
                     fr_rate["dim_source"] = f"FLAT_{p_code}"
@@ -144,7 +144,7 @@ def shop_and_optimize(order_no,weight, dims, to_state, to_zip, sku_info, store_i
         # FINAL FALLBACK: PRIORITY MAIL
         print("  [!] No Ground options met date. Falling back to Priority Mail...")
         fallback_pkg = str(sku_info.get("Package","")).strip()
-        priority_raw, _ = get_live_rates(order_no, "usps", "usps_priority_mail", "package", weight, dims, to_state, to_zip, is_residential)
+        priority_raw, _ = get_live_rates(order_no, order_info,"usps", "usps_priority_mail", "package", weight, dims, to_state, to_zip, is_residential)
         priority = [
             r for r in priority_raw 
             if (r.get("packageType") or r.get("package_type")) in ["package", "parcel", None]

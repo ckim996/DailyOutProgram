@@ -10,14 +10,19 @@ from generate_test_data import generate_test_orders
 from src.shipping.engine import get_carrier_service
 from src.shipping.engine import get_sku_info_from_dailyouttools, get_weight_from_pkg_string
 from src.shipping.optimizer import shop_and_optimize
-from src.shipstation.rates import get_live_rates
+from src.shipstation.rates import get_live_rates, get_order_address
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import config
 import re
+import src.fedex.fedex_config as fedex_config
+import requests
 
 base_font = Font(size=9)
 store_font = Font(size=12,bold=True)
+
+V1_SHIPSTATION_API_KEY=os.getenv("SHIPSTATION_API_KEY")
+V1_SHIPSTATION_API_SECRET=os.getenv("SHIPSTATION_API_SECRET")
 
 WRAP_COLUMNS = {"Part#", "Interchange #", "Attention"}
 
@@ -174,6 +179,10 @@ def fetch_order_data(row, order_total_qty, sku_info, lp_lookup):
         :param lp_lookup: GP#s dictionary that has GP# and its LP Price coming from 'LP' Sheet inside DailyOutTools
     """
     order_no = row.get("Order #")
+    addr_data = get_order_address(order_no)
+    if not addr_data:
+        return {"order_no": order_no, "decision_msg": "Address Not Found", "is_ebay": False}
+    
     shippingDB_cost = float(sku_info.get("Shipping DB", 0) or 0) if sku_info else 0.0
     total_qty = order_total_qty.get(order_no, 0)
     
@@ -214,7 +223,7 @@ def fetch_order_data(row, order_total_qty, sku_info, lp_lookup):
     else:
         c, s, p, w, dims = decision
         if c != "SHOP_RATES":
-            rate_results, _ = get_live_rates(order_no, c, s, p, w, dims, row.get("State"), row.get("Zip"),is_residential=False)
+            rate_results, _ = get_live_rates(order_no, addr_data, c, s, p, w, dims, row.get("State"), row.get("Zip"),is_residential=False)
             if rate_results:
                 best_rate = rate_results[0]
                 raw_pkg = best_rate.get("packageType")
@@ -227,7 +236,7 @@ def fetch_order_data(row, order_total_qty, sku_info, lp_lookup):
                 })
         else:
             store_id = row.get("Store")
-            best_rate = shop_and_optimize(order_no, w, dims, row.get("State"), row.get("Zip"), sku_info,store_id=store_id, is_residential=False)
+            best_rate = shop_and_optimize(order_no, addr_data, w, dims, row.get("State"), row.get("Zip"), sku_info,store_id=store_id, is_residential=False)
         
         best_rate_cost = best_rate.get("shipmentCost", 0.0) if best_rate else 0.0
         
@@ -273,6 +282,19 @@ def fetch_order_data(row, order_total_qty, sku_info, lp_lookup):
             if best_rate.get("winning_pkg_str"):
                 print(f"{order_no} | winning_pkg_str: {best_rate.get("winning_pkg_str")}")
 
+            # FEDEX LOGIC
+            f_comparison_log = "N/A" 
+            fedex_summary = ""
+            fedex_decision = ""
+            try:
+                f_best_price, f_best_service, f_days, f_source, f_comparison_log = fedex_config.get_fedex_comparison_logic(order_no, current_weight, dims, best_rate.get("winning_pkg_str"))
+                d_label = f"{f_days}d" if f_days is not None else "?d"
+                fedex_summary = f"{f_source}/{f_best_service}/${f_best_price:.2f} ({d_label})"
+                fedex_decision = "FEDEX" if (f_best_price < best_rate_cost and f_best_price > 0) else ""
+            except Exception as e:
+                fedex_summary = f"Error: {e}"
+                fedex_decision = ""
+
             log_entry = {
                 "Order #": order_no,
                 "SKU": row.get("SKU"),
@@ -292,7 +314,10 @@ def fetch_order_data(row, order_total_qty, sku_info, lp_lookup):
                 "GP": sku_info.get("Part #","") if sku_info else "",
                 "Interchange": sku_info.get("Interchange (not in order)","") if sku_info else "",
                 "Store Name":get_store_name(row.get("Store")),
-                "Shipping Status":""
+                "Shipping Status":"",
+                "Fedex Full Log": f_comparison_log,
+                "Fedex Info": fedex_summary,
+                "Fedex Decision": fedex_decision
             }
 
             return {
@@ -659,7 +684,8 @@ def write_grouped_excel(store_rows, output_file):
     
     log_ws = wb.create_sheet(title="Decision Log")
     log_headers = ["Order #", "SKU", "Shipping DB Cost", "Winner", "Comparison", "Savings", "Decision", "SKU Pkg",
-                   "Delivery Time (Days)", "Arrival", "Fallback","LP","Weight","Dims","Shipping Cost","GP","Interchange", "Store Name","Shipping Status"]
+                   "Delivery Time (Days)", "Arrival", "Fallback","LP","Weight","Dims","Shipping Cost","GP",
+                   "Interchange", "Store Name","Shipping Status","Fedex Full Log","Fedex Info", "Fedex Decision"]
     log_ws.append(log_headers)
 
     for cell in log_ws[1]:
@@ -674,13 +700,19 @@ def write_grouped_excel(store_rows, output_file):
             entry["Order #"], entry["SKU"], entry["DB Cost"], 
             entry["Winner"], entry["Comparison"], entry["Savings"], entry["Decision Type"], 
             entry["Pkg"], entry["Delivery Time"], entry["Arrival"], entry["Fallback"], entry["LP"], 
-            entry["Weight"], entry["Dims"], entry["Shipping Cost"], entry["GP"], entry["Interchange"], entry["Store Name"], entry["Shipping Status"]
+            entry["Weight"], entry["Dims"], entry["Shipping Cost"], entry["GP"], entry["Interchange"], 
+            entry["Store Name"], entry["Shipping Status"], entry["Fedex Full Log"], entry["Fedex Info"], entry["Fedex Decision"]
         ]
         log_ws.append(row_data)
 
         # Get the row we just added
         curr_log_row = log_ws.max_row
         savings_cell = log_ws.cell(row=curr_log_row, column=5) # Column 5 is Savings
+
+        # Fedex cell logic
+        if entry["Fedex Decision"] == "FEDEX":
+            log_ws.cell(row=curr_log_row, column=21).fill = green_savings
+            log_ws.cell(row=curr_log_row, column=21).font = Font(bold=True)
 
         # Apply Savings Highlighting
         if isinstance(entry["Savings"], (int, float)):
@@ -752,12 +784,21 @@ def extract_todays_shipments():
             
             qty = int(item.get("quantity",1))
 
+            requested_service = str(order.get("requestedShippingService", "")).lower()
+            is_pickup = "pickup" in requested_service
+
+            full_name = order.get("shipTo",{}).get("name","").strip()
+            name_parts = full_name.split()
+
+            first_name = name_parts[0] if name_parts else ""
+            last_name = name_parts[-1] if name_parts else ""
+
             for _ in range(qty):
                 store_rows[store_id].append({
                     "Sequence": None,
                     "Order #": order["orderNumber"],
-                    "First Name": order.get("shipTo",{}).get("name","").split()[0] if not order.get("First Name") else order.get("First Name"),
-                    "Last Name": order.get("shipTo",{}).get("name","").split()[-1] if not order.get("Last Name") else order.get("Last Name"),
+                    "First Name": first_name if not is_pickup else "",
+                    "Last Name": last_name if not is_pickup else "",
                     "SKU": sku,
                     "Part#": gp,
                     "Interchange #": interchange,
@@ -766,12 +807,12 @@ def extract_todays_shipments():
                     "Service": None,
                     "Box": None,
                     "Shipping Price": None,
-                    "Attention": None,
+                    "Attention": "PICKUP" if is_pickup else "",
                     "Order Date": order["orderDate"][:10],
                     "Ship By": ship_by_date,
                     "State": order["shipTo"]["state"],
                     "Zip":order["shipTo"].get("postalCode"),
-                    "Store": order["advancedOptions"].get("storeId")
+                    "Store": order["advancedOptions"].get("storeId"),
                 })
     if not store_rows:
         return {"status": "empty", "message": "No shipments today"}
